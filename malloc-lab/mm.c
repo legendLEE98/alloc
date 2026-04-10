@@ -7,6 +7,7 @@
  * realloc은 mm_malloc과 mm_free를 이용해 직접 구현되어 있습니다.
  *
  * 학생 노트: 이 헤더 주석을 본인의 구현 방식에 대한 설명으로 교체하세요.
+ * 테스트
  */
 #include <stdio.h>
 #include <stdlib.h>
