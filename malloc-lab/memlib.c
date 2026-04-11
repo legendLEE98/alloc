@@ -15,22 +15,26 @@
 #include "config.h"
 
 /* private variables */
-static char *mem_start_brk;  /* points to first byte of heap */
-static char *mem_brk;        /* points to last byte of heap */
-static char *mem_max_addr;   /* largest legal heap address */ 
+static char *mem_start_brk;  // heap 어디부터 시작했는지
+static char *mem_brk;        // heap 현재 어디까지 할당을 시켜놨는지의 주소값
+static char *mem_max_addr;   // heap 이 최대 할당할 수 있는 메모리 영역
 
 /* 
  * mem_init - initialize the memory system model
  */
+
 void mem_init(void)
 {
-    /* allocate the storage we will use to model the available VM */
+    // mem_start_brk => NULL 이라면 공간 자체를 할당하지 못한다는 의미
     if ((mem_start_brk = (char *)malloc(MAX_HEAP)) == NULL) {
-	fprintf(stderr, "mem_init_vm: malloc error\n");
-	exit(1);
+        // 메모리 오류를 반환하고 프로그램 실행을 종료시켜버립니다.
+        fprintf(stderr, "mem_init_vm: malloc error\n");
+        exit(1);
     }
 
+    // max_heap + 시작 메모리주소 == 종료지점
     mem_max_addr = mem_start_brk + MAX_HEAP;  /* max legal heap address */
+    // mem_brk를 초기화 시킴
     mem_brk = mem_start_brk;                  /* heap is empty initially */
 }
 
@@ -55,16 +59,25 @@ void mem_reset_brk()
  *    by incr bytes and returns the start address of the new area. In
  *    this model, the heap cannot be shrunk.
  */
+
+// os한테 힙 영역을 할당 받음. 
+// mem_start_brk 이녀석 범위 안에서 추가할 수 있다
+// int incr == 받은 매개변수 만큼 메모리 추가 할당 요청
 void *mem_sbrk(int incr) 
 {
+    // old_brk정의 = mem_brk;
     char *old_brk = mem_brk;
 
-    if ( (incr < 0) || ((mem_brk + incr) > mem_max_addr)) {
-	errno = ENOMEM;
-	fprintf(stderr, "ERROR: mem_sbrk failed. Ran out of memory...\n");
-	return (void *)-1;
+    // incr 0 || mem_brk + incr > 메모리값보다 크면
+    if ((incr < 0) || ((mem_brk + incr) > mem_max_addr)) {
+        errno = ENOMEM;
+        fprintf(stderr, "ERROR: mem_sbrk failed. Ran out of memory...\n");
+        return (void *)-1;
     }
+
+    // mem_brk += incr 값을 추가하면 
     mem_brk += incr;
+    // old_brk의 주소를 리턴합니다.
     return (void *)old_brk;
 }
 
