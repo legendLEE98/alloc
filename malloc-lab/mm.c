@@ -58,14 +58,15 @@ team_t team = {
 #define GET_ALLOC(p) (GET(p) & 0x1)
 
 // bp 블록 포인터 위치 주소
-// hdrp는 해당 bp의 헤드의 주소 (시작지점)
+// hdrp는 해당 bp의 헤더의 주소 (시작지점)
 #define HDRP(bp) ((char *)(bp) - WSIZE)
-// getSize는 헤당 블록의 최대 크기 + 페이로드 위치 = 4 + n - 8. 즉 푸터의 위치
+// getSize는 헤당 블록의 최대 크기 + 페이로드 위치 = 4 + n - 8. 즉 현재 푸터의 위치
 #define FTRP(bp) ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE)
 
-// 다음 블럭의 페이로드 위치
+// 다음 블럭 페이로드의 위치
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 // 이전 블럭의 푸터의 사이즈를 보고 해당 사이즈만큼 현재 페이로드에서 뺌.
+// 즉 이전 페이로드의 위치
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
 // 아래는 naive malloc 구현방식 (동등한 같은 의미로 쓰임)
@@ -81,8 +82,13 @@ team_t team = {
 char * heap_listp;
 
 // static 함수 선언
+
+// 힙 연장 기능
 static void *extend_heap(size_t words);
+// free list 정렬 기능
 static void *coalesce(void *bp);
+// 핏 방법론 찾기
+static void *find_fit(size_t asize);
 
 /*
  * mm_init - malloc 패키지를 초기화합니다.
@@ -135,14 +141,13 @@ static void *extend_heap(size_t words) {
     
     PUT(HDRP(bp), PACK(size, 0));
     PUT(FTRP(bp), PACK(size, 0));
-    PUT(HDRP(NEXT_BLKP(bp)), PACK(size, 0));
+    PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));
 
-    // 양쪽 남는 영역 있으면 합치는 애
     return coalesce(bp);
 }
 
 /*
- * mm_free - 블록을 해제합니다. (현재 아무 동작도 하지 않음)
+ * mm_free - 블록을 해제합니다.
  */
 void mm_free(void *bp)
 {
@@ -156,9 +161,48 @@ void mm_free(void *bp)
     coalesce(bp);
 }
 
+// 양쪽 남는 영역 있으면 합치는 애
 static void *coalesce(void *bp)
 {
-    
+    // 이전, 다음 alloc이 사용중인지 확인하는 기능
+    size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
+    size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
+    // 현재 크기 bp의 사이즈 확인
+    size_t size = GET_SIZE(HDRP(bp));
+
+    // 조건문
+    // prev, next 둘 다 사용 중인 경우 ( 1, 1 인 경우)
+    if (prev_alloc && next_alloc)
+        return bp;
+    // next만 비었을 경우
+    // 해야 할 것
+    // 헤더 위치는 고정에, 푸터의 위치만 바뀌면 됨.
+    else if (prev_alloc && !next_alloc) {
+        // 현재 크기 + 다음 공간 사이즈
+        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+        PUT(HDRP(bp), PACK(size, 0));
+        PUT(FTRP(bp), PACK(size, 0));
+    }
+    // prev만 비었을 경우
+    // 해야 할 것
+    // size는 일단 프리뷰 블럭만큼 키우고, 푸터 먼저 서언
+    // 헤더 위치 구하고, bp값 이전 헤더 위치로 변경
+    else if (!prev_alloc && next_alloc) {
+        size += GET_SIZE(FTRP(PREV_BLKP(bp)));
+        PUT(FTRP(bp), PACK(size, 0));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    // 둘 다 비었을 경우
+    // 해야 할 것
+    // 위에 한거 두 개
+    else {
+        size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+        PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
+        bp = PREV_BLKP(bp);
+    }
+    return bp;
 }
 
 /*
@@ -167,7 +211,76 @@ static void *coalesce(void *bp)
  */
 void *mm_malloc(size_t size)
 {
+    size_t asize;
+    size_t extendSize;
+    char *bp;
 
+    // 할당 요청인데 사이즈가 없으면 반환해야함.
+    if (size == 0)
+        return NULL;
+    
+    // size보다 DSIZE가 더 크면
+    // 헤더 푸터 포함해서 딱 2만 전달해주면 됨.
+    if (size <= DSIZE)
+        asize = 2*DSIZE;
+    // 그 외의 경우
+    else 
+        // DSIZE * (크기 + 8(헤더푸터) + (DSIZE-1)) / DSIZE
+        // 이거 15대입하면 padding 1 / 16대입하면 padding 0임 짱인데
+        asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
+    
+    // free list인 블록 찾기
+    // asize에 맞는 bp 포인터 위치 찾기
+    if ((bp = find_fit(asize))) {
+        // 장소 선정. bp랑 asize만큼 제공
+        place(bp, asize);
+        return bp;
+    }
+
+    // asize 혹은 청크 크기만큼 할당
+    // 힙 추가로 열어달라고 요청
+    extendSize = MAX(asize, CHUNKSIZE);
+    if ((bp = extend_heap(extendSize/WSIZE)) == NULL)
+        return NULL;
+
+    // 연장요청 해왔으니까 bp 공간 다시 할당해줘야 함.
+    // asize = 요청 사이즈를 얼라이먼트에 맞춰서 할당해준 필요값
+    place(bp, asize);
+
+    return bp;
+}
+
+// first fit으로 찾아야 함.
+// 순회하면서 맞는 값 찾는거임
+static void *find_fit(size_t asize) {
+    // 임시 temp선언
+    void *bp;
+
+    // next blkp로 순회, 해당 블럭의 사이즈가 0 보다 클 때 까지
+    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+        // 해당 블럭이 allocate 상태가 아니면서, 입력받은 사이즈보다 getSize가 크거나 같을 때
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+            return bp;
+        }
+    }
+    return NULL;
+}
+
+// 헤더 푸터 포함해서 최소 16의 공간이 있어야 함.
+// bp - 포인터 위치 / asize - 유저가 요청하는 블럭 단위
+static void place(void * bp, size_t asize) {
+    size_t csize = GET_SIZE(HDRP(bp));
+    
+    if ((csize - asize) >= (2*DSIZE)) {
+        PUT(HDRP(bp), PACK(asize, 1));
+        PUT(FTRP(bp), PACK(asize, 1));
+        bp = NEXT_BLKP(bp);
+        PUT(HDRP(bp), PACK(csize-asize, 0));
+        PUT(FTRP(bp), PACK(csize-asize, 0));
+    } else {
+        PUT(HDRP(bp), PACK(csize, 1));
+        PUT(FTRP(bp), PACK(csize, 1));
+    }
 }
 
 /*
