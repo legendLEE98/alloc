@@ -40,6 +40,10 @@ team_t team = {
 // 반환값 4096
 #define CHUNKSIZE (1<<12)
 
+// 전처리 지시문 조건사항
+// 1 = first / 2 = next / 3 = best
+#define fit 3
+
 // 크기 비교
 #define MAX(x, y) ((x) > (y)? (x) : (y)) 
 // ((size | alloc)) 반환 - byte는 8단위고, 8단위 아래 3개는 비트 남으니까 alloc 상태값까지 더함.
@@ -81,6 +85,8 @@ team_t team = {
 // 주소 선언
 char * heap_listp;
 
+char * last_fit;
+
 // static 함수 선언
 
 // 힙 연장 기능
@@ -116,6 +122,9 @@ int mm_init(void)
     // heap의 실제 시작지점을 프롤로그 영역으로 지정
     // 프롤로그 푸터 위치 존재. next_blkp로 다음 영역부터 찾기
     heap_listp += (2*WSIZE);
+
+    // last fit 사용시
+    last_fit = heap_listp;
 
     // extend_heap(size_t words)
     if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
@@ -204,6 +213,9 @@ static void *coalesce(void *bp)
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+    if (last_fit > (char *)bp && last_fit < (char *)bp + GET_SIZE(HDRP(bp)))
+    
+    last_fit = bp;
     return bp;
 }
 
@@ -252,6 +264,7 @@ void *mm_malloc(size_t size)
     return bp;
 }
 
+#if fit == 1
 // first fit으로 찾아야 함.
 // 순회하면서 맞는 값 찾는거임
 static void *find_fit(size_t asize) {
@@ -268,20 +281,44 @@ static void *find_fit(size_t asize) {
     return NULL;
 }
 
-static void *next_fit(size_t asize) {
+#elif fit == 2
+static void *find_fit(size_t asize) {
     // 임시 temp선언
-    void *bp;
+    char *bp;
 
-    // next blkp로 순회, 해당 블럭의 사이즈가 0 보다 클 때 까지
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        // 해당 블럭이 allocate 상태가 아니면서, 입력받은 사이즈보다 getSize가 크거나 같을 때
+    // last_fit부터 시작하는 로직
+    for (bp = last_fit; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+            last_fit = bp;
             return bp;
         }
     }
+
+    for (bp = heap_listp; bp < last_fit; bp = NEXT_BLKP(bp)) {
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+            last_fit = bp;
+            return bp;
+        }
+    }
+    
+    last_fit = heap_listp;
+    return NULL;
+}
+#elif fit == 3
+// best_fit
+// 메모리 찾아다니면서 본인과 맞는게 있는지 체크
+// 본인 크기와 가장 비슷한 녀석을 찾다가 본인과 같은 녀석이 있다면 해당 주소에 할당
+static void *find_fit(size_t asize) {
+    // 임시 temp선언
+    char *bp;
+    char *simBp;
+
+    for (bp = heap_listp; )
+
     return NULL;
 }
 
+#endif
 // 헤더 푸터 포함해서 최소 16의 공간이 있어야 함.
 // bp - 포인터 위치 / asize - 유저가 요청하는 블럭 단위
 static void place(void * bp, size_t asize) {

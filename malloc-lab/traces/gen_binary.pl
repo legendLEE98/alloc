@@ -36,4 +36,3 @@ for ($i = 0;  $i < $num_iters; $i += 1) {
 }
 
 close OUTFILE;
-
