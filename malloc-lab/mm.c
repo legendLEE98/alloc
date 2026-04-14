@@ -87,8 +87,10 @@ char * heap_listp;
 static void *extend_heap(size_t words);
 // free list 정렬 기능
 static void *coalesce(void *bp);
-// 핏 방법론 찾기
+// first fit으로 찾기
 static void *find_fit(size_t asize);
+// 힙 연장 후 재할당 기능 추가
+static void place(void * bp, size_t asize);
 
 /*
  * mm_init - malloc 패키지를 초기화합니다.
@@ -266,6 +268,20 @@ static void *find_fit(size_t asize) {
     return NULL;
 }
 
+static void *next_fit(size_t asize) {
+    // 임시 temp선언
+    void *bp;
+
+    // next blkp로 순회, 해당 블럭의 사이즈가 0 보다 클 때 까지
+    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+        // 해당 블럭이 allocate 상태가 아니면서, 입력받은 사이즈보다 getSize가 크거나 같을 때
+        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+            return bp;
+        }
+    }
+    return NULL;
+}
+
 // 헤더 푸터 포함해서 최소 16의 공간이 있어야 함.
 // bp - 포인터 위치 / asize - 유저가 요청하는 블럭 단위
 static void place(void * bp, size_t asize) {
@@ -286,7 +302,29 @@ static void place(void * bp, size_t asize) {
 /*
  * mm_realloc - mm_malloc과 mm_free를 이용해 단순하게 구현한 realloc
  */
-void *mm_realloc(void *ptr, size_t size)
+void *mm_realloc(void *bp, size_t size)
 {
+    // bp가 NULL이면 그냥 malloc
+    if (bp == NULL)
+        return mm_malloc(size);
+    
+    // size가 0이면 그냥 free
+    if (size == 0) {
+        mm_free(bp);
+        return NULL;
+    }
 
+    // 새 공간 할당
+    void *newbp = mm_malloc(size);
+    if (newbp == NULL)
+        return NULL;
+
+    // 기존 데이터 복사
+    size_t oldsize = GET_SIZE(HDRP(bp)) - DSIZE;  // 헤더+푸터 빼고
+    if (size < oldsize)
+        oldsize = size;  // 줄어드는 경우 새 크기만큼만 복사
+    memcpy(newbp, bp, oldsize);
+
+    mm_free(bp);
+    return newbp;
 }
