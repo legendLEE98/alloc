@@ -80,6 +80,8 @@ team_t team = {
 
 // 주소 선언
 char * heap_listp;
+// nextFit 용도
+char * last_fit;
 
 // static 함수 선언
 
@@ -100,27 +102,32 @@ int mm_init(void)
     // heap_listp를 전역으로 선언하면 0x0000이 나옴
     // 여기에서 해당 주소값이 0xfffff일 경우((void*)-1) 인 경우면 return -1을 함.
     // mem_sbrk가 할당 불가능하단 의미
-    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
+
+    // 현재 프롤로그, 에필로그 생성해야 할 필요가 있음.
+    if ((heap_listp = mem_sbrk(4*WSIZE)) == ((void*)-1))
         return -1;
+
     // 해당 주소의 값 0으로 초기화
+    // 방어적 코딩 목적
     PUT(heap_listp, 0);
-    
+
     // ㅡㅡㅡ 얘네는 가드 역할(넘어가지 말란 의미로 사용) ㅡㅡㅡㅡ
     // 프롤로그 영역의 헤더 선언
     PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
     // 프롤로그 영역의 푸터 선언
     PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
     // 에필로그 영역의 헤더 선언
-    PUT(heap_listp + (3*WSIZE), (PACK(0, 1)));
+    PUT(heap_listp + (3*WSIZE), PACK(0, 1));
 
     // heap의 실제 시작지점을 프롤로그 영역으로 지정
     // 프롤로그 푸터 위치 존재. next_blkp로 다음 영역부터 찾기
     heap_listp += (2*WSIZE);
-
-    // extend_heap(size_t words)
-    if (extend_heap(CHUNKSIZE / WSIZE) == NULL)
-        return -1;
     
+    // extend_heap(size_t words)
+    // free block 미리 확보
+    if (extend_heap((CHUNKSIZE / WSIZE)) == NULL)
+        return -1;
+
     return 0;
 }
 
@@ -252,33 +259,30 @@ void *mm_malloc(size_t size)
     return bp;
 }
 
-// first fit으로 찾아야 함.
+// first fit
 // 순회하면서 맞는 값 찾는거임
+// static void *find_fit(size_t asize) {
+//     // 임시 temp선언
+//     void *bp;
+
+//     // next blkp로 순회, 해당 블럭의 사이즈가 0 보다 클 때 까지
+//     for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+//         // 해당 블럭이 allocate 상태가 아니면서, 입력받은 사이즈보다 getSize가 크거나 같을 때
+//         if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
+//             return bp;
+//         }
+//     }
+//     return NULL;
+// }
+
+// next fit
+// 다음거 보고 보고 할당
 static void *find_fit(size_t asize) {
-    // 임시 temp선언
-    void *bp;
+    char * bp;
 
-    // next blkp로 순회, 해당 블럭의 사이즈가 0 보다 클 때 까지
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        // 해당 블럭이 allocate 상태가 아니면서, 입력받은 사이즈보다 getSize가 크거나 같을 때
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
-            return bp;
-        }
-    }
-    return NULL;
-}
+    for (bp = last_fit)
 
-static void *next_fit(size_t asize) {
-    // 임시 temp선언
-    void *bp;
 
-    // next blkp로 순회, 해당 블럭의 사이즈가 0 보다 클 때 까지
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
-        // 해당 블럭이 allocate 상태가 아니면서, 입력받은 사이즈보다 getSize가 크거나 같을 때
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
-            return bp;
-        }
-    }
     return NULL;
 }
 
